@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  browser-auto-mcp:
+    build: .
+    container_name: browser-auto-mcp
+    restart: unless-stopped
+    volumes:
+      # Mount the configuration file for easy editing on the host
+      - ./config.yaml:/app/config.yaml
+      
+      # Mount directories for persistent storage outside the container
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+      - ./videos:/app/videos
+      - ./exports:/app/exports
+      
+    # MCP communicates via stdio, but since we're in Docker,
+    # you can also use this as a standalone automation hub
+    stdin_open: true
+    tty: true
+
+    # headless is set in config.yaml, Docker usually requires headless: true
+    # unless you set up an X11 server for the container

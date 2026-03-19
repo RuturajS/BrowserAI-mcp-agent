@@ -1,0 +1,8 @@
+node_modules
+dist
+logs
+screenshots
+videos
+exports
+.git
+.env
