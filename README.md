@@ -7,15 +7,16 @@ This Mode Context Protocol (MCP) server provides tools for browser automation an
 - Node.js (v18 or higher)
 - npm (installed with Node.js)
 
-## Quick Setup (Recommended)
+## Quick Installation
 
-Run the **doctor** script for your operating system to automatically install dependencies, download browsers, and build the project in one click.
+For a single-click experience that configures your Claude Desktop automatically:
 
-- **Windows Batch:** Double-click `doctor.bat`
-- **Windows PowerShell:** Right-click `doctor.ps1` and select "Run with PowerShell"
-- **Linux/macOS:** Run `bash doctor.sh`
+- **Windows One-Click:** Right-click `install-claude.ps1` and select "Run with PowerShell".
+- **Cross-platform:** Run `npm run browserAutoMCP` in your terminal.
 
-## Manual Installation
+This will build your project, install Playwright (Chromium), and automatically update your `claude_desktop_config.json` file.
+
+## Manual Installation (Optional)
 
 If you prefer to install manually:
 
