@@ -11,11 +11,11 @@
 
 browserSettings:
   browsers: ["chrome"] # Options: "chrome", "firefox", "edge", "webkit", "all"
-  headless: true       # RECOMMENDED: Set to true for Docker execution
+  headless: false       # RECOMMENDED: Set to true for Docker execution
   parallel: false
   viewport:
-    width: 1280
-    height: 720
+    width: 1380
+    height: 820
   recordVideo: true
   slowMo: 0
   screenshotInterval: 5 # Automatically take a screenshot every X seconds (0 to disable)
