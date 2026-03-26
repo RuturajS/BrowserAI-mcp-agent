@@ -48,15 +48,35 @@ If you prefer to install manually:
 - Be aware that the browser will be visible (unless headless mode is changed in code) and will perform actions on your behalf.
 - Review the `/logs` and `/videos` folders to audit the actions taken by the AI.
 
-## Claude Desktop Configuration
+## Configuration Guide
 
-To use this server with Claude Desktop, you must update your configuration file.
+To use this server with Claude Desktop, you need to configure both the **Claude Desktop App** and the **Project Settings**.
 
-1. Open the following directory:
-   `%APPDATA%\Claude`
+### 1. Claude Desktop Configuration
+Add the following to your `claude_desktop_config.json` (located in `%APPDATA%\Claude\`).
 
-2. Open `claude_desktop_config.json` and add the following configuration:
+#### Option A: Development Mode (Run with TypeScript)
+Best for making changes to the code without building every time.
+```json
+{
+  "mcpServers": {
+    "browser-auto": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "ts-node",
+        "C:/path/to/your/project/BrowserAutoMCP/src/index.ts"
+      ],
+      "env": {
+        "NODE_PATH": "C:/path/to/your/project/BrowserAutoMCP/node_modules"
+      }
+    }
+  }
+}
+```
 
+#### Option B: Production Mode (Run Compiled JS)
+Recommended for stable use after running `npm run build`.
 ```json
 {
   "mcpServers": {
@@ -69,10 +89,35 @@ To use this server with Claude Desktop, you must update your configuration file.
   }
 }
 ```
-
 *Note: Replace `C:/path/to/your/project/` with your actual installation directory.*
 
-3. Restart Claude Desktop.
+### 2. Project Configuration (config.yaml)
+Customize the browser behavior in the `config.yaml` file located in the project root.
+
+```yaml
+browserSettings:
+  browsers: ["chrome"]  # Options: "chrome", "firefox", "edge", "webkit", "all"
+  headless: false        # Set to true for background execution
+  parallel: false        # Set to true to run multiple browsers at once
+  viewport:
+    width: 1380
+    height: 820
+  recordVideo: true      # Enable/disable session recording
+  slowMo: 0              # Add delay (ms) between actions for visibility
+  screenshotInterval: 5  # Auto-screenshot every X seconds (0 to disable)
+
+directories:
+  logs: "logs"           # Folder for execution logs
+  screenshots: "screenshots"
+  videos: "videos"
+  exports: "exports"
+
+automationOptions:
+  cleanAtStartup: false  # Auto-empty folders on every server start
+```
+
+3. **Restart Claude Desktop** after making these changes.
+
 
 ## Usage & Test Case Examples
 
