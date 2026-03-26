@@ -155,6 +155,9 @@ async function launchBrowser(browserName: string) {
 }
 
 async function getBrowsers() {
+  // Remove disconnected browsers
+  browsers = browsers.filter(b => b.instance.isConnected());
+
   if (browsers.length === 0) {
     const requestedBrowsers = config.browserSettings.browsers.includes("all") 
       ? ["chrome", "firefox", "edge"] 
@@ -168,7 +171,6 @@ async function getBrowsers() {
       browsers = await Promise.all(launchPromises);
     } else {
       // In non-parallel mode, we still store all in browsers array but tool execution might differ
-      // For now, let's launch all that are in config.
       for (const name of requestedBrowsers) {
         const instance = await launchBrowser(name);
         browsers.push({ name, instance });
@@ -179,7 +181,12 @@ async function getBrowsers() {
 }
 
 async function getPages() {
+  // Check if browsers are still connected
   const browserList = await getBrowsers();
+  
+  // Filter out any pages that have been closed
+  pages = pages.filter(p => !p.page.isClosed());
+  
   if (pages.length === 0) {
     for (const b of browserList) {
       const context = await b.instance.newContext({
@@ -250,20 +257,32 @@ async function getPages() {
   return pages;
 }
 
-// Clean shutdown handling
-async function shutdown() {
-  writeLog("INFO", "Shutting down server...");
+async function closeAllSessions() {
   for (const p of pages) {
     if (p.screenshotTimer) {
       clearInterval(p.screenshotTimer);
     }
-    await p.context.close();
+    try {
+      await p.context.close();
+    } catch (err) {
+      writeLog("ERROR", `Failed to close context: ${err}`);
+    }
   }
   pages = [];
   for (const b of browsers) {
-    await b.instance.close();
+    try {
+      await b.instance.close();
+    } catch (err) {
+      writeLog("ERROR", `Failed to close browser: ${err}`);
+    }
   }
   browsers = [];
+}
+
+// Clean shutdown handling
+async function shutdown() {
+  writeLog("INFO", "Shutting down server...");
+  await closeAllSessions();
 }
 
 process.on("SIGINT", async () => {
@@ -531,10 +550,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: [{ type: "text", text: results.join("\n") }] };
       }
       case "stop_automation": {
-        const pList = await getPages();
-        if (pList.length === 0) {
-          writeLog("INFO", "No active automation flow to stop");
-          return { content: [{ type: "text", text: "No active automation flow to stop." }] };
+        // Just use existing pages without re-initializing them if they are gone
+        pages = pages.filter(p => !p.page.isClosed());
+        const pList = [...pages];
+        
+        if (pList.length === 0 && browsers.length === 0) {
+          writeLog("INFO", "No active automation flow or browser instances to stop");
+          return { content: [{ type: "text", text: "No active automation flow or browser instances to stop." }] };
         }
 
         const stopResults = [];
@@ -547,22 +569,40 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             videoPath = await video.path();
           }
 
-          await context.close();
-
+          // Handle video re-naming if it exists
           if (videoPath && fs.existsSync(videoPath)) {
             const finalTimeStamp = new Date().toISOString().replace(/[:.]/g, "-");
             const finalName = args?.name ? `${args.name}-${browserName}-${finalTimeStamp}.webm` : `automation-${browserName}-${finalTimeStamp}.webm`;
             const finalPath = path.join(videoDir, finalName);
-            fs.renameSync(videoPath, finalPath);
-            stopResults.push(`${browserName}: Stopped. Video: ${finalPath}`);
+            
+            // Close context to finish video
+            try {
+              await context.close();
+            } catch (err) {
+              writeLog("ERROR", `Failed to close context during stop_automation: ${err}`);
+            }
+            
+            if (fs.existsSync(videoPath)) {
+               fs.renameSync(videoPath, finalPath);
+               stopResults.push(`${browserName}: Stopped. Video: ${finalPath}`);
+            } else {
+               stopResults.push(`${browserName}: Stopped.`);
+            }
           } else {
+            try {
+              await context.close();
+            } catch (err) {
+              writeLog("ERROR", `Failed to close context during stop_automation: ${err}`);
+            }
             stopResults.push(`${browserName}: Stopped.`);
           }
         }
 
-        pages = [];
-        writeLog("INFO", "All automation flows stopped.");
-        return { content: [{ type: "text", text: stopResults.join("\n") }] };
+        // Now close everything including browser instances to satisfy user request for "quit it properly"
+        await closeAllSessions();
+
+        writeLog("INFO", "All automation flows stopped and browser instances closed.");
+        return { content: [{ type: "text", text: stopResults.length > 0 ? stopResults.join("\n") : "Browser sessions closed properly." }] };
       }
       default:
         throw new Error(`Tool not found: ${name}`);
