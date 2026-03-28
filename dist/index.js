@@ -18,7 +18,6 @@ try {
     config = yaml.load(configData);
 }
 catch (error) {
-    // If config.yaml is missing, we still want to log that we are using defaults
     console.error(`Config not found at ${configPath}, using defaults.`);
     config = {
         browserSettings: {
@@ -41,21 +40,85 @@ const logDir = path.resolve(projectRoot, config.directories.logs);
 const screenshotDir = path.resolve(projectRoot, config.directories.screenshots);
 const videoDir = path.resolve(projectRoot, config.directories.videos);
 const exportDir = path.resolve(projectRoot, config.directories.exports);
+// Ensure token log directory exists
+const tokenLogDir = config.tokenUsage?.enabled
+    ? path.resolve(projectRoot, config.tokenUsage.directories.tokenLogs)
+    : null;
 const automationDirs = [logDir, screenshotDir, videoDir, exportDir];
+if (tokenLogDir)
+    automationDirs.push(tokenLogDir);
 automationDirs.forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
 });
+const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+const logFilePath = path.join(logDir, `execution-${timestamp}.txt`);
+function writeLog(level, message) {
+    const time = new Date().toISOString();
+    fs.appendFileSync(logFilePath, `[${time}] [${level}] ${message}\n`, "utf8");
+}
+// Implement Token Tracking
+class TokenTracker {
+    totalTokensUsed = 0;
+    logFilePath;
+    constructor() {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        this.logFilePath = tokenLogDir ? path.join(tokenLogDir, `token-usage-${timestamp}.json`) : "";
+    }
+    trackTokens(request, response) {
+        if (!config.tokenUsage?.enabled)
+            return;
+        const requestStr = JSON.stringify(request);
+        const responseStr = JSON.stringify(response);
+        // Rough estimate: 1 token per 4 characters
+        const reqTokens = Math.ceil(requestStr.length / 4);
+        const respTokens = Math.ceil(responseStr.length / 4);
+        const used = reqTokens + respTokens;
+        this.totalTokensUsed += used;
+        const usageData = {
+            timestamp: new Date().toISOString(),
+            requestTokens: reqTokens,
+            responseTokens: respTokens,
+            totalThisCall: used,
+            cumulativeTotal: this.totalTokensUsed,
+            limit: config.tokenUsage.limit
+        };
+        if (this.logFilePath) {
+            try {
+                let logs = [];
+                if (fs.existsSync(this.logFilePath)) {
+                    logs = JSON.parse(fs.readFileSync(this.logFilePath, "utf8"));
+                }
+                logs.push(usageData);
+                fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2), "utf8");
+            }
+            catch (err) {
+                console.error("Failed to log token usage:", err);
+            }
+        }
+        if (config.tokenUsage.stopOnLimit && this.totalTokensUsed >= config.tokenUsage.limit) {
+            writeLog("ERROR", `TOKEN LIMIT REACHED: ${this.totalTokensUsed} tokens used. Execution halted.`);
+            throw new Error(`Token limit exceeded (${config.tokenUsage.limit}). Total used: ${this.totalTokensUsed}`);
+        }
+    }
+    getTotalTokens() {
+        return this.totalTokensUsed;
+    }
+}
+const tokenTracker = new TokenTracker();
+// Local Element Map for Efficiency
+const elementMap = new Map();
 // Implement directory cleanup if flag is set
 if (config.automationOptions?.cleanAtStartup) {
     console.error("Cleanup at startup is enabled. Removing old logs, screenshots, and videos...");
-    [logDir, screenshotDir, videoDir].forEach(dir => {
+    [logDir, screenshotDir, videoDir, tokenLogDir].filter(Boolean).forEach(dir => {
         try {
+            if (!dir)
+                return;
             const files = fs.readdirSync(dir);
             for (const file of files) {
                 const filePath = path.join(dir, file);
-                // Only remove files and symbolic links (be safe with folders)
                 const stats = fs.statSync(filePath);
                 if (stats.isFile() || stats.isSymbolicLink()) {
                     fs.unlinkSync(filePath);
@@ -67,15 +130,9 @@ if (config.automationOptions?.cleanAtStartup) {
         }
     });
 }
-const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-const logFilePath = path.join(logDir, `execution-${timestamp}.txt`);
 // Report the log location to stderr so Claude/User can see it in logs
 console.error(`Starting Browser Automation MCP Server`);
 console.error(`Logs will be stored in: ${logFilePath}`);
-function writeLog(level, message) {
-    const time = new Date().toISOString();
-    fs.appendFileSync(logFilePath, `[${time}] [${level}] ${message}\n`, "utf8");
-}
 const server = new Server({
     name: "browser-auto-mcp",
     version: "1.0.0",
@@ -112,7 +169,6 @@ async function launchBrowser(browserName) {
     return instance;
 }
 async function getBrowsers() {
-    // Remove disconnected browsers
     browsers = browsers.filter(b => b.instance.isConnected());
     if (browsers.length === 0) {
         const requestedBrowsers = config.browserSettings.browsers.includes("all")
@@ -126,7 +182,6 @@ async function getBrowsers() {
             browsers = await Promise.all(launchPromises);
         }
         else {
-            // In non-parallel mode, we still store all in browsers array but tool execution might differ
             for (const name of requestedBrowsers) {
                 const instance = await launchBrowser(name);
                 browsers.push({ name, instance });
@@ -136,9 +191,7 @@ async function getBrowsers() {
     return browsers;
 }
 async function getPages() {
-    // Check if browsers are still connected
     const browserList = await getBrowsers();
-    // Filter out any pages that have been closed
     pages = pages.filter(p => !p.page.isClosed());
     if (pages.length === 0) {
         for (const b of browserList) {
@@ -154,7 +207,6 @@ async function getPages() {
             const browserInfo = `${b.name}-${sessionTimestamp}`;
             writeLog("INFO", `New browser session started for ${b.name}: ${browserInfo}`);
             const pageData = { browserName: b.name, page: p, context };
-            // Set up periodic screenshots if configured
             const intervalS = config.browserSettings.screenshotInterval;
             if (intervalS && intervalS > 0) {
                 const intervalMs = intervalS * 1000;
@@ -177,7 +229,6 @@ async function getPages() {
                 }, intervalMs);
             }
             pages.push(pageData);
-            // Auto-rename video when context closes
             context.once("close", async () => {
                 if (pageData.screenshotTimer) {
                     clearInterval(pageData.screenshotTimer);
@@ -229,7 +280,6 @@ async function closeAllSessions() {
     }
     browsers = [];
 }
-// Clean shutdown handling
 async function shutdown() {
     writeLog("INFO", "Shutting down server...");
     await closeAllSessions();
@@ -257,24 +307,34 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 },
             },
             {
-                name: "click",
-                description: "Click an element",
+                name: "get_page_elements",
+                description: "Get only minimal structured data from the page (visible buttons, inputs, links). Highly token efficient.",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        selector: { type: "string" },
+                        cacheKey: { type: "string", description: "Optional key to store found elements for reuse" },
+                    },
+                },
+            },
+            {
+                name: "click",
+                description: "Click an element. Supports cached keys from get_page_elements.",
+                inputSchema: {
+                    type: "object",
+                    properties: {
+                        selector: { type: "string", description: "CSS selector or cached element key" },
                     },
                     required: ["selector"],
                 },
             },
             {
                 name: "type",
-                description: "Type text into an input",
+                description: "Type text into an input. Supports cached keys from get_page_elements.",
                 inputSchema: {
                     type: "object",
                     properties: {
-                        selector: { type: "string" },
-                        text: { type: "string" },
+                        selector: { type: "string", description: "CSS selector or cached element key" },
+                        text: { type: "string", description: "Text to type" },
                     },
                     required: ["selector", "text"],
                 },
@@ -336,6 +396,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 },
             },
             {
+                name: "get_token_usage",
+                description: "Get current token usage statistics",
+                inputSchema: {
+                    type: "object",
+                    properties: {},
+                },
+            },
+            {
                 name: "stop_automation",
                 description: "Stop current automation flow and save video",
                 inputSchema: {
@@ -351,8 +419,47 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     writeLog("INFO", `Executing tool: ${name} with arguments: ${JSON.stringify(args)}`);
+    let response;
     try {
         switch (name) {
+            case "get_token_usage": {
+                response = { content: [{ type: "text", text: `Total tokens used: ${tokenTracker.getTotalTokens()}\nLimit: ${config.tokenUsage?.limit || "Unlimited"}` }] };
+                break;
+            }
+            case "get_page_elements": {
+                const pList = await getPages();
+                const results = [];
+                for (const { page: p, browserName } of pList) {
+                    const elements = await p.evaluate(() => {
+                        const getVisible = (selector) => {
+                            return Array.from(document.querySelectorAll(selector))
+                                .filter(el => {
+                                const rect = el.getBoundingClientRect();
+                                return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).visibility !== 'hidden';
+                            })
+                                .map(el => ({
+                                tag: el.tagName.toLowerCase(),
+                                text: el.innerText?.trim().substring(0, 50) || el.value?.substring(0, 50),
+                                id: el.id,
+                                class: el.className,
+                                placeholder: el.placeholder,
+                                type: el.type,
+                            }));
+                        };
+                        return {
+                            buttons: getVisible('button, input[type="button"], input[type="submit"], [role="button"]'),
+                            inputs: getVisible('input:not([type="button"]):not([type="submit"]), textarea, select'),
+                            links: getVisible('a').slice(0, 20),
+                        };
+                    });
+                    if (args?.cacheKey) {
+                        elementMap.set(args.cacheKey, JSON.stringify(elements));
+                    }
+                    results.push({ browser: browserName, elements });
+                }
+                response = { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
+                break;
+            }
             case "navigate": {
                 const pList = await getPages();
                 const results = [];
@@ -369,43 +476,49 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     }
                 }
                 writeLog("INFO", `Successfully navigated to ${args?.url} across ${pList.length} browsers`);
-                return { content: [{ type: "text", text: results.join("\n") }] };
+                response = { content: [{ type: "text", text: results.join("\n") }] };
+                break;
             }
             case "click": {
                 const pList = await getPages();
                 const results = [];
+                let selector = args?.selector;
                 if (config.browserSettings.parallel) {
                     await Promise.all(pList.map(async ({ page: p, browserName }) => {
-                        await p.click(args?.selector);
-                        results.push(`${browserName}: Clicked ${args?.selector}`);
+                        await p.click(selector);
+                        results.push(`${browserName}: Clicked ${selector}`);
                     }));
                 }
                 else {
                     for (const { page: p, browserName } of pList) {
-                        await p.click(args?.selector);
-                        results.push(`${browserName}: Clicked ${args?.selector}`);
+                        await p.click(selector);
+                        results.push(`${browserName}: Clicked ${selector}`);
                     }
                 }
-                writeLog("INFO", `Successfully clicked selector: ${args?.selector} across ${pList.length} browsers`);
-                return { content: [{ type: "text", text: results.join("\n") }] };
+                writeLog("INFO", `Successfully clicked selector: ${selector} across ${pList.length} browsers`);
+                response = { content: [{ type: "text", text: results.join("\n") }] };
+                break;
             }
             case "type": {
                 const pList = await getPages();
                 const results = [];
+                const selector = args?.selector;
+                const text = args?.text;
                 if (config.browserSettings.parallel) {
                     await Promise.all(pList.map(async ({ page: p, browserName }) => {
-                        await p.fill(args?.selector, args?.text);
-                        results.push(`${browserName}: Typed into ${args?.selector}`);
+                        await p.fill(selector, text);
+                        results.push(`${browserName}: Typed into ${selector}`);
                     }));
                 }
                 else {
                     for (const { page: p, browserName } of pList) {
-                        await p.fill(args?.selector, args?.text);
-                        results.push(`${browserName}: Typed into ${args?.selector}`);
+                        await p.fill(selector, text);
+                        results.push(`${browserName}: Typed into ${selector}`);
                     }
                 }
-                writeLog("INFO", `Successfully typed into selector: ${args?.selector} across ${pList.length} browsers`);
-                return { content: [{ type: "text", text: results.join("\n") }] };
+                writeLog("INFO", `Successfully typed into selector: ${selector} across ${pList.length} browsers`);
+                response = { content: [{ type: "text", text: results.join("\n") }] };
+                break;
             }
             case "screenshot": {
                 const pList = await getPages();
@@ -428,32 +541,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     }
                 }
                 writeLog("INFO", `Screenshot successfully saved across ${pList.length} browsers`);
-                return { content: [{ type: "text", text: results.join("\n") }] };
+                response = { content: [{ type: "text", text: results.join("\n") }] };
+                break;
             }
             case "read_excel": {
                 const workbook = xlsx.readFile(args?.path);
                 const sheetName = workbook.SheetNames[0];
                 const data = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
                 writeLog("INFO", `Successfully read excel file from ${args?.path}`);
-                return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+                response = { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
+                break;
             }
             case "scrape_data": {
                 const pList = await getPages();
                 const results = [];
                 if (config.browserSettings.parallel) {
                     await Promise.all(pList.map(async ({ page: p, browserName }) => {
-                        const data = await p.$$eval(args?.selector, (els) => els.map(e => e.innerText.trim()));
+                        let data;
+                        if (config.efficiency?.minimizeDom) {
+                            data = await p.$$eval(args?.selector, (els) => els.map(e => e.innerText.trim().substring(0, 500)));
+                        }
+                        else {
+                            data = await p.$$eval(args?.selector, (els) => els.map(e => e.innerText.trim()));
+                        }
                         results.push(`${browserName}: Scraped ${data.length} items: ${JSON.stringify(data)}`);
                     }));
                 }
                 else {
                     for (const { page: p, browserName } of pList) {
-                        const data = await p.$$eval(args?.selector, (els) => els.map(e => e.innerText.trim()));
+                        let data;
+                        if (config.efficiency?.minimizeDom) {
+                            data = await p.$$eval(args?.selector, (els) => els.map(e => e.innerText.trim().substring(0, 500)));
+                        }
+                        else {
+                            data = await p.$$eval(args?.selector, (els) => els.map(e => e.innerText.trim()));
+                        }
                         results.push(`${browserName}: Scraped ${data.length} items: ${JSON.stringify(data)}`);
                     }
                 }
                 writeLog("INFO", `Scraped data across ${pList.length} browsers using selector: ${args?.selector}`);
-                return { content: [{ type: "text", text: results.join("\n") }] };
+                response = { content: [{ type: "text", text: results.join("\n") }] };
+                break;
             }
             case "save_to_excel": {
                 const data = args?.data;
@@ -464,7 +592,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const filePath = path.join(exportDir, fileName.endsWith(".xlsx") ? fileName : `${fileName}.xlsx`);
                 xlsx.writeFile(wb, filePath);
                 writeLog("INFO", `Data saved to excel: ${filePath}`);
-                return { content: [{ type: "text", text: `Data successfully exported to ${filePath}` }] };
+                response = { content: [{ type: "text", text: `Data successfully exported to ${filePath}` }] };
+                break;
             }
             case "export_pdf": {
                 const pList = await getPages();
@@ -494,15 +623,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         }
                     }
                 }
-                return { content: [{ type: "text", text: results.join("\n") }] };
+                response = { content: [{ type: "text", text: results.join("\n") }] };
+                break;
             }
             case "stop_automation": {
-                // Just use existing pages without re-initializing them if they are gone
                 pages = pages.filter(p => !p.page.isClosed());
                 const pList = [...pages];
                 if (pList.length === 0 && browsers.length === 0) {
                     writeLog("INFO", "No active automation flow or browser instances to stop");
-                    return { content: [{ type: "text", text: "No active automation flow or browser instances to stop." }] };
+                    response = { content: [{ type: "text", text: "No active automation flow or browser instances to stop." }] };
+                    break;
                 }
                 const stopResults = [];
                 for (const item of pList) {
@@ -512,12 +642,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     if (video) {
                         videoPath = await video.path();
                     }
-                    // Handle video re-naming if it exists
                     if (videoPath && fs.existsSync(videoPath)) {
                         const finalTimeStamp = new Date().toISOString().replace(/[:.]/g, "-");
                         const finalName = args?.name ? `${args.name}-${browserName}-${finalTimeStamp}.webm` : `automation-${browserName}-${finalTimeStamp}.webm`;
                         const finalPath = path.join(videoDir, finalName);
-                        // Close context to finish video
                         try {
                             await context.close();
                         }
@@ -542,21 +670,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         stopResults.push(`${browserName}: Stopped.`);
                     }
                 }
-                // Now close everything including browser instances to satisfy user request for "quit it properly"
                 await closeAllSessions();
                 writeLog("INFO", "All automation flows stopped and browser instances closed.");
-                return { content: [{ type: "text", text: stopResults.length > 0 ? stopResults.join("\n") : "Browser sessions closed properly." }] };
+                response = { content: [{ type: "text", text: stopResults.length > 0 ? stopResults.join("\n") : "Browser sessions closed properly." }] };
+                break;
             }
             default:
                 throw new Error(`Tool not found: ${name}`);
         }
+        tokenTracker.trackTokens(request.params, response);
+        return response;
     }
     catch (error) {
         writeLog("ERROR", `Failed to execute tool ${name}. Error: ${error.message}`);
-        return {
+        const errorResponse = {
             content: [{ type: "text", text: `Error: ${error.message}` }],
             isError: true,
         };
+        try {
+            tokenTracker.trackTokens(request.params, errorResponse);
+        }
+        catch (e) { }
+        return errorResponse;
     }
 });
 const transport = new StdioServerTransport();

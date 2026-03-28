@@ -20,6 +20,23 @@ browserSettings:
   slowMo: 0
   screenshotInterval: 5 # Automatically take a screenshot every X seconds (0 to disable)
 
+# -------------------------------------------------------------
+# Efficiency & Cost Management
+# -------------------------------------------------------------
+efficiency:
+  minimizeDom: true         # Only return minimal DOM/structured data (buttons, inputs, links)
+  useElementMap: true       # Cache and reuse selectors for previously identified elements
+  targetedScreenshots: true # Take screenshots of specific elements or regions instead of full page
+  reductionTarget: 0.9      # Aim for 90% reduction in token consumption
+
+tokenUsage:
+  enabled: true
+  limit: 100000             # Maximum tokens allowed per session/day (example)
+  stopOnLimit: true        # Stop execution if token limit is reached
+  logLevel: "detailed"      # Options: "summary", "detailed"
+  directories:
+    tokenLogs: "logs/token_usage"
+
 directories:
   logs: "logs"
   screenshots: "screenshots"
