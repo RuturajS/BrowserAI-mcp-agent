@@ -92,7 +92,7 @@ Recommended for stable use after running `npm run build`.
 *Note: Replace `C:/path/to/your/project/` with your actual installation directory.*
 
 ### 2. Project Configuration (config.yaml)
-Customize the browser behavior in the `config.yaml` file located in the project root.
+Customize the browser behavior, efficiency, and token tracking in the `config.yaml` file located in the project root.
 
 ```yaml
 browserSettings:
@@ -106,6 +106,22 @@ browserSettings:
   slowMo: 0              # Add delay (ms) between actions for visibility
   screenshotInterval: 5  # Auto-screenshot every X seconds (0 to disable)
 
+# -------------------------------------------------------------
+# Efficiency & Cost Management
+# -------------------------------------------------------------
+efficiency:
+  minimizeDom: true         # Only return minimal DOM/structured data (highly efficient)
+  useElementMap: true       # Cache and reuse selectors for identified elements
+  reductionTarget: 0.9      # Target 90% reduction in token consumption
+
+tokenUsage:
+  enabled: true
+  limit: 100000             # Max tokens allowed per session
+  stopOnLimit: true        # Stop execution if token limit is reached
+  logLevel: "detailed"      # Options: "summary", "detailed"
+  directories:
+    tokenLogs: "logs/token_usage"
+
 directories:
   logs: "logs"           # Folder for execution logs
   screenshots: "screenshots"
@@ -115,6 +131,22 @@ directories:
 automationOptions:
   cleanAtStartup: false  # Auto-empty folders on every server start
 ```
+
+## Token Efficiency & Optimization
+
+This server is built with a focus on reducing **LLM token consumption** and **API costs**.
+
+### Key Efficiency Features:
+1. **Minimized DOM Retrieval**: Use the `get_page_elements` tool instead of full page scraping. It extracts only visible buttons, inputs, and relevant links, reducing the returned data size by up to **90%**.
+2. **Token Monitoring**: Every request and response is tracked. You can view your current usage with the `get_token_usage` tool.
+3. **Usage Safeguards**: Set a maximum token limit in `config.yaml`. The server will gracefully halt if the limit is exceeded, preventing unexpected costs.
+4. **Element Caching**: When using `get_page_elements`, you can provide a `cacheKey` to store found elements, allowing you to reference them in future `click` or `type` actions without re-scanning the page.
+
+### Best Practices:
+- Use `get_page_elements` for discovery and navigation.
+- Only use `scrape_data` when specific content extraction is required.
+- Enable `efficiency.minimizeDom` in `config.yaml` for aggressive data reduction.
+
 
 3. **Restart Claude Desktop** after making these changes.
 
@@ -142,22 +174,25 @@ Once the server is configured, you can interact with it using natural language i
 ## Available Tools
 
 - **navigate**: Opens a URL in the browser.
-- **click**: Clicks on a specific CSS selector.
-- **type**: Fills an input field with text using a CSS selector.
-- **scrape_data**: Extracts text content from elements matching a CSS selector.
-- **save_to_excel**: Converts JSON data (like results from a scrape) into a downloadable `.xlsx` file.
-- **export_pdf**: Saves the current page view as a PDF document (requires Chromium headless).
-- **screenshot**: Takes a visual snapshot and saves it in the `screenshots` folder with a timestamp.
-- **read_excel**: Reads data from `.xlsx`, `.xls`, or `.csv` files and returns JSON format.
+- **get_page_elements**: Retrives visible buttons, inputs, and links from the active page. Highly token efficient for discovery.
+- **click**: Clicks on a specific CSS selector or element key.
+- **type**: Fills an input field with text using a CSS selector or element key.
+- **get_token_usage**: Returns a summary of tokens used in the current session.
+- **scrape_data**: Extracts text content from elements matching a CSS selector. Automatically truncates long content when efficiency mode is on.
+- **save_to_excel**: Converts JSON data into a downloadable `.xlsx` file.
+- **export_pdf**: Saves the current page view as a PDF document.
+- **screenshot**: Takes a visual snapshot and saves it in the `screenshots` folder.
+- **read_excel**: Reads data from `.xlsx`, `.xls`, or `.csv` files.
 - **stop_automation**: Gracefully closes the browser session and finalizes video recording.
 
 ## Output Directories
 
 The server automatically creates the following directories to store execution data:
 
-- **/logs**: Continuous execution logs with timestamps (execution-YYYY-MM-DD.txt).
+- **/logs**: Continuous execution logs with timestamps (`execution-YYYY-MM-DD.txt`).
+- **/logs/token_usage**: JSON reports of token consumption per request/response for cost analysis.
 - **/screenshots**: Visual captures from the `screenshot` tool.
-- **/videos**: Full screen recordings of automation sessions (automation-flow-YYYY-MM-DD.webm).
+- **/videos**: Full screen recordings of automation sessions.
 - **/exports**: Generated Excel sheets (`.xlsx`) and PDF reports.
 
 ## Project Structure

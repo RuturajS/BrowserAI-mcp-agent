@@ -1,5 +1,5 @@
 # Use the official Playwright Jammy image (Node 20+ included)
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy
+FROM mcr.microsoft.com/playwright:v1.51.0-jammy
 
 # Set the working directory
 WORKDIR /app

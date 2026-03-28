@@ -11,6 +11,7 @@ services:
       
       # Mount directories for persistent storage outside the container
       - ./logs:/app/logs
+      - ./logs/token_usage:/app/logs/token_usage
       - ./screenshots:/app/screenshots
       - ./videos:/app/videos
       - ./exports:/app/exports
