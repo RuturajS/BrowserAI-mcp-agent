@@ -17,7 +17,7 @@
     "@modelcontextprotocol/sdk": "^1.27.1",
     "js-yaml": "^4.1.1",
     "playwright": "^1.58.2",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.3.6"
   },
   "devDependencies": {
