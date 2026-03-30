@@ -10,7 +10,7 @@
 # -------------------------------------------------------------
 
 browserSettings:
-  browsers: ["chrome"] # Options: "chrome", "firefox", "edge", "webkit", "all"
+  browsers: ["edge"] # Options: "chrome", "firefox", "edge", "webkit", "all"
   headless: false       # RECOMMENDED: Set to true for Docker execution
   parallel: false
   viewport:
@@ -18,7 +18,7 @@ browserSettings:
     height: 820
   recordVideo: true
   slowMo: 0
-  screenshotInterval: 5 # Automatically take a screenshot every X seconds (0 to disable)
+  screenshotInterval: 30 # Automatically take a screenshot every X seconds (0 to disable)
 
 # -------------------------------------------------------------
 # Efficiency & Cost Management
@@ -31,7 +31,7 @@ efficiency:
 
 tokenUsage:
   enabled: true
-  limit: 100000             # Maximum tokens allowed per session/day (example)
+  limit: 10000             # Maximum tokens allowed per session/day (example)
   stopOnLimit: true        # Stop execution if token limit is reached
   logLevel: "detailed"      # Options: "summary", "detailed"
   directories:
